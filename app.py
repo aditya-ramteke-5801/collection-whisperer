@@ -9,6 +9,9 @@ import streamlit as st
 from openai import OpenAI
 from datetime import datetime
 from io import BytesIO
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # =============================================================================
 # DATA LOADING AND PROCESSING
@@ -241,7 +244,9 @@ def query_llm(user_query: str, system_prompt: str) -> str:
     """
     Send query to OpenAI GPT-4 and get pandas code back.
     """
-    api_key = "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"
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        raise ValueError("OPENAI_API_KEY environment variable not set")
 
     client = OpenAI(api_key=api_key)
 
@@ -507,3 +512,6 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+
