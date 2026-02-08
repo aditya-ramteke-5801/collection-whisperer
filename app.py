@@ -629,6 +629,11 @@ def export_to_excel(df: pd.DataFrame) -> BytesIO:
     return output
 
 
+def export_to_csv(df: pd.DataFrame) -> str:
+    """Export DataFrame to CSV string."""
+    return df.to_csv(index=False)
+
+
 def create_preview_table(preview_data: dict) -> pd.DataFrame:
     """Create a preview table with placeholder values."""
     columns = [col.get('name', col.get('Column', '')) for col in preview_data['output_columns']]
@@ -699,6 +704,10 @@ def main():
         st.session_state.confirmed_logic = None
     if 'confirmed_filters' not in st.session_state:
         st.session_state.confirmed_filters = []
+    if 'renaming_thread' not in st.session_state:
+        st.session_state.renaming_thread = None
+    if 'active_thread_index' not in st.session_state:
+        st.session_state.active_thread_index = None
 
     # Load data
     data_file = "/Users/aditya/Documents/DPDzero/Slice Performance Jan 2025.csv"
@@ -750,17 +759,46 @@ def main():
 
         if st.session_state.thread_history:
             for i, thread in enumerate(st.session_state.thread_history):
-                # Show first message as thread title
-                thread_title = thread['messages'][0]['content'][:40] + "..." if len(thread['messages'][0]['content']) > 40 else thread['messages'][0]['content']
-                if st.button(thread_title, key=f"thread_{i}", use_container_width=True):
-                    # Restore this thread
-                    st.session_state.current_thread = thread['messages'].copy()
-                    st.session_state.last_result = thread.get('last_result')
-                    st.session_state.confirmed_logic = thread.get('confirmed_logic')
-                    st.session_state.last_generated_code = thread.get('last_generated_code')
-                    st.session_state.preview_data = None
-                    st.session_state.current_query = None
-                    st.rerun()
+                # Show custom name or first message as thread title
+                thread_title = thread.get('name', thread['messages'][0]['content'][:40] + "..." if len(thread['messages'][0]['content']) > 40 else thread['messages'][0]['content'])
+
+                col1, col2 = st.columns([4, 1])
+                with col1:
+                    if st.button(thread_title, key=f"thread_{i}", use_container_width=True):
+                        # Restore this thread
+                        st.session_state.current_thread = thread['messages'].copy()
+                        st.session_state.last_result = thread.get('last_result')
+                        st.session_state.confirmed_logic = thread.get('confirmed_logic')
+                        st.session_state.confirmed_filters = thread.get('confirmed_filters', [])
+                        st.session_state.last_generated_code = thread.get('last_generated_code')
+                        st.session_state.active_thread_index = i
+                        st.session_state.preview_data = None
+                        st.session_state.current_query = None
+                        st.rerun()
+                with col2:
+                    if st.button("✏️", key=f"rename_{i}", help="Rename thread"):
+                        st.session_state.renaming_thread = i
+                        st.rerun()
+
+            # Show rename input if renaming
+            if 'renaming_thread' in st.session_state and st.session_state.renaming_thread is not None:
+                idx = st.session_state.renaming_thread
+                if idx < len(st.session_state.thread_history):
+                    new_name = st.text_input(
+                        "New thread name:",
+                        value=st.session_state.thread_history[idx].get('name', ''),
+                        key="rename_input"
+                    )
+                    col1, col2 = st.columns(2)
+                    with col1:
+                        if st.button("Save", key="save_rename"):
+                            st.session_state.thread_history[idx]['name'] = new_name
+                            st.session_state.renaming_thread = None
+                            st.rerun()
+                    with col2:
+                        if st.button("Cancel", key="cancel_rename"):
+                            st.session_state.renaming_thread = None
+                            st.rerun()
         else:
             st.caption("No threads yet. Start a conversation below!")
 
@@ -774,6 +812,7 @@ def main():
                         'messages': st.session_state.current_thread.copy(),
                         'last_result': st.session_state.last_result,
                         'confirmed_logic': st.session_state.confirmed_logic,
+                        'confirmed_filters': st.session_state.confirmed_filters,
                         'last_generated_code': st.session_state.last_generated_code
                     }
                     st.session_state.thread_history.insert(0, thread_data)
@@ -783,7 +822,9 @@ def main():
                 st.session_state.last_result = None
                 st.session_state.preview_data = None
                 st.session_state.confirmed_logic = None
+                st.session_state.confirmed_filters = []
                 st.session_state.last_generated_code = None
+                st.session_state.active_thread_index = None
                 st.rerun()
 
         st.divider()
@@ -805,6 +846,7 @@ def main():
                         'messages': st.session_state.current_thread.copy(),
                         'last_result': st.session_state.last_result,
                         'confirmed_logic': st.session_state.confirmed_logic,
+                        'confirmed_filters': st.session_state.confirmed_filters,
                         'last_generated_code': st.session_state.last_generated_code
                     }
                     st.session_state.thread_history.insert(0, thread_data)
@@ -815,7 +857,9 @@ def main():
                 st.session_state.preview_data = None
                 st.session_state.last_result = None
                 st.session_state.confirmed_logic = None
+                st.session_state.confirmed_filters = []
                 st.session_state.last_generated_code = None
+                st.session_state.active_thread_index = None
                 st.rerun()
 
     # ==========================================================================
@@ -824,15 +868,36 @@ def main():
 
     # Display conversation history
     if st.session_state.current_thread:
-        for msg in st.session_state.current_thread:
+        for msg_idx, msg in enumerate(st.session_state.current_thread):
             with st.chat_message(msg['role']):
                 st.write(msg['content'])
                 if msg.get('result') is not None:
+                    result_df = msg['result']
                     st.dataframe(
-                        style_dataframe(msg['result']),
+                        style_dataframe(result_df),
                         use_container_width=True,
                         hide_index=True
                     )
+                    # Download buttons for each result in thread
+                    col1, col2, col3 = st.columns([1, 1, 4])
+                    with col1:
+                        excel_data = export_to_excel(result_df)
+                        st.download_button(
+                            label="📥 Excel",
+                            data=excel_data,
+                            file_name=f"result_{msg_idx}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key=f"excel_thread_{msg_idx}"
+                        )
+                    with col2:
+                        csv_data = export_to_csv(result_df)
+                        st.download_button(
+                            label="📥 CSV",
+                            data=csv_data,
+                            file_name=f"result_{msg_idx}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                            mime="text/csv",
+                            key=f"csv_thread_{msg_idx}"
+                        )
 
     # Display last result if exists and no preview is pending
     if st.session_state.last_result is not None and st.session_state.preview_data is None:
@@ -848,15 +913,23 @@ def main():
             hide_index=True
         )
 
-        # Action buttons
-        col1, col2, col3 = st.columns([1, 1, 3])
+        # Action buttons - Download options
+        col1, col2, col3, col4 = st.columns([1, 1, 1, 2])
         with col1:
             excel_data = export_to_excel(result_df)
             st.download_button(
-                label="📥 Download Excel",
+                label="📥 Excel",
                 data=excel_data,
                 file_name=f"query_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx",
                 mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            )
+        with col2:
+            csv_data = export_to_csv(result_df)
+            st.download_button(
+                label="📥 CSV",
+                data=csv_data,
+                file_name=f"query_result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv"
             )
 
         # Show generated code (Python and SQL)
