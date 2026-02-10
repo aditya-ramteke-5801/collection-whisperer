@@ -6,6 +6,7 @@ Features a two-step UX: preview output structure and logic, then run.
 
 import os
 import json
+import textwrap
 import pandas as pd
 import streamlit as st
 from openai import OpenAI
@@ -515,9 +516,24 @@ Assume the table is named 'loans' with the same column names as the DataFrame.""
         elif '```' in python_part:
             python_part = python_part.split('```')[1].split('```')[0]
         result['python'] = python_part.strip()
+    elif '```python' in response_text:
+        # No PYTHON: header but has python code block
+        python_part = response_text.split('```python')[1].split('```')[0]
+        result['python'] = python_part.strip()
     else:
-        # Fallback - treat entire response as Python
-        result['python'] = response_text.replace('```python', '').replace('```', '').strip()
+        # Fallback - try to extract just the Python part
+        # Look for common SQL indicators to separate Python from SQL
+        python_part = response_text
+
+        # Remove SQL section if present (handles various formats)
+        for sql_marker in ['\nSQL:', '\nsql\n', '\n```sql', '\nSELECT ', '\nselect ']:
+            if sql_marker in python_part:
+                python_part = python_part.split(sql_marker)[0]
+                break
+
+        # Clean up markdown
+        python_part = python_part.replace('```python', '').replace('```', '').strip()
+        result['python'] = python_part
 
     # Extract SQL code
     if 'SQL:' in response_text:
@@ -526,6 +542,10 @@ Assume the table is named 'loans' with the same column names as the DataFrame.""
             sql_part = sql_part.split('```sql')[1].split('```')[0]
         elif '```' in sql_part:
             sql_part = sql_part.split('```')[1].split('```')[0]
+        result['sql'] = sql_part.strip()
+    elif '```sql' in response_text:
+        # No SQL: header but has sql code block
+        sql_part = response_text.split('```sql')[1].split('```')[0]
         result['sql'] = sql_part.strip()
 
     return result
@@ -543,21 +563,11 @@ def execute_pandas_code(code: str, df: pd.DataFrame) -> pd.DataFrame:
     # Clean the code - remove markdown backticks if present
     code = code.replace('```python', '').replace('```', '').strip()
 
-    # Fix common indentation issues - normalize to consistent indentation
-    lines = code.split('\n')
-    cleaned_lines = []
-    for line in lines:
-        # Remove any leading tabs and convert to spaces
-        stripped = line.lstrip()
-        if stripped:
-            # Count leading whitespace
-            leading = len(line) - len(stripped)
-            # Normalize indentation (convert tabs to 4 spaces)
-            indent = line[:leading].replace('\t', '    ')
-            cleaned_lines.append(indent + stripped)
-        else:
-            cleaned_lines.append('')
-    code = '\n'.join(cleaned_lines)
+    # Use textwrap.dedent to remove common leading whitespace
+    code = textwrap.dedent(code)
+
+    # Normalize tabs to spaces
+    code = code.replace('\t', '    ')
 
     # Create controlled namespace with only df and pd
     namespace = {
