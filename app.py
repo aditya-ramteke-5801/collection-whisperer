@@ -329,7 +329,7 @@ what the output table will look like and the logic for each column.
 - **Count of Cases**: Count of Loan Number (unique loans)
 - **Resolved Count**: Count where Status = COLLECTED
 - **Count Efficiency**: (Resolved Count / Count of Cases) * 100
-- **Amount Efficiency**: (Collected Amount / AUM) * 100
+- **Amount Efficiency**: (Collected Amount / AUM) * 100. IMPORTANT: AUM = Allocation amount, NOT Amount Pending
 - **POS Efficiency**: (POS Collected / Total POS) * 100
 - **MOB (Month on Book)**: How long since loan was disbursed
 
@@ -491,7 +491,7 @@ Available Regions: {regions}
 - Tara/Voice Bot sent → 'Tara Call Sent Count'
 - Tara/Voice Bot delivered → 'Tara Call Delivered Count'
 - Collection/collected → 'Resolution amount' (when Status=COLLECTED)
-- AUM/allocation → 'Allocation amount'
+- AUM/allocation → 'Allocation amount' (use this for efficiency calculations, NOT 'Amount Pending')
 - POS/principal/outstanding → 'Principal Balance Amount' or 'POS'
 - Cases/count → count of 'Loan Number'
 - Resolved/collected cases → sum of 'Resolved' (where Status=COLLECTED)
@@ -542,6 +542,7 @@ Available Regions: {regions}
 
 ## WORKING CODE EXAMPLE for Count/Amount Efficiency by DPD Bucket:
 IMPORTANT: Do NOT add any date filters - use ALL data in df.
+IMPORTANT: For Amount Efficiency, always use 'Allocation amount' as denominator, NEVER use 'Amount Pending'. Amount Pending is the remaining balance which can be less than collected amount.
 ```
 result = df.groupby('DPD Bucket', observed=True).agg({{
     'Loan Number': 'count',
