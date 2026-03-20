@@ -1,0 +1,57 @@
+@import "tailwindcss";
+
+@theme {
+  --font-ui: 'EB Garamond', serif;
+  --font-serif: 'Literata', serif;
+  --color-primary: #5C3D2E;
+  --color-primary-light: #7B5B4C;
+  --color-bg: #FAF6F0;
+  --color-panel: #F3ECE0;
+  --color-border: #D4C5B0;
+  --color-text: #3B2F2A;
+  --color-text-secondary: #7A6B5D;
+  --color-text-muted: #A89885;
+  --color-highlight: #F5E6C8;
+  --color-highlight-border: #D4B88C;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: 'EB Garamond', serif;
+  color: #3B2F2A;
+  background: #FAF6F0;
+}
+
+button {
+  cursor: pointer;
+  font-family: 'EB Garamond', serif;
+}
+
+select, input {
+  font-family: 'EB Garamond', serif;
+}
+
+::-webkit-scrollbar {
+  width: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #D4C5B0;
+}
+
+@keyframes shimmer {
+  0% { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+
+.shimmer {
+  background: linear-gradient(90deg, #F3ECE0 25%, #E8DFD0 50%, #F3ECE0 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.5s infinite;
+}
