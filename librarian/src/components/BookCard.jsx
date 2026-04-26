@@ -1,15 +1,10 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db } from '../db';
 import { generateCoverSvg } from '../utils/cover-generator';
 
-function formatTime(ms) {
-  if (!ms || ms < 60000) return '< 1m';
-  const totalMin = Math.floor(ms / 60000);
-  if (totalMin < 60) return `${totalMin}m`;
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return m > 0 ? `${h}h ${m}m` : `${h}h`;
+function getWordCount(text) {
+  return text ? text.split(/\s+/).length : 0;
 }
 
 export default function BookCard({ book, onDelete, onRename }) {
@@ -17,9 +12,37 @@ export default function BookCard({ book, onDelete, onRename }) {
   const [renaming, setRenaming] = useState(false);
   const [titleInput, setTitleInput] = useState(book.title);
 
-  const progress = book.chapters.length > 0
-    ? Math.round(((book.current_chapter + 1) / book.chapters.length) * 100)
-    : 0;
+  const progress = useMemo(() => {
+    const chapters = book.chapters || [];
+    // Only count actual content chapters (exclude Front/Back Matter)
+    const contentChapters = chapters.filter(
+      (ch) => ch.title !== 'Front Matter' && ch.title !== 'Back Matter'
+    );
+    if (contentChapters.length === 0) return 0;
+
+    const totalWords = contentChapters.reduce((sum, ch) => sum + getWordCount(ch.content), 0);
+    if (totalWords === 0) return 0;
+
+    const bookmarks = book.bookmarks || {};
+    let wordsRead = 0;
+
+    for (const ch of chapters) {
+      if (ch.title === 'Front Matter' || ch.title === 'Back Matter') continue;
+
+      const chapterIdx = chapters.indexOf(ch);
+      const paraIndex = bookmarks[chapterIdx];
+
+      if (paraIndex !== undefined && paraIndex !== null) {
+        // Count words up to and including the bookmarked paragraph
+        const paras = ch.content.split(/\n\n+/).filter(Boolean);
+        for (let p = 0; p <= Math.min(paraIndex, paras.length - 1); p++) {
+          wordsRead += getWordCount(paras[p]);
+        }
+      }
+    }
+
+    return Math.min(100, Math.round((wordsRead / totalWords) * 100));
+  }, [book]);
 
   const coverSrc = book.cover_image || generateCoverSvg(book.title, book.author);
 
@@ -85,7 +108,7 @@ export default function BookCard({ book, onDelete, onRename }) {
 
         <div className="mt-3 text-xs" style={{ color: '#A89885' }}>
           <div className="flex justify-between">
-            <span>{formatTime(book.time_spent_ms)} read</span>
+            <span>{progress}% completed</span>
             <span>Ch {book.current_chapter + 1}/{book.chapters.length}</span>
           </div>
           <div className="mt-1 h-1 w-full" style={{ background: '#D4C5B0' }}>

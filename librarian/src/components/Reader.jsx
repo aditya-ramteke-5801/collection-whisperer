@@ -7,6 +7,7 @@ import ReadingPane from './ReadingPane';
 import ProgressBar from './ProgressBar';
 import QuizMode from './QuizMode';
 import ChatPanel from './ChatPanel';
+import NotesPanel from './NotesPanel';
 
 export default function Reader() {
   const { bookId } = useParams();
@@ -19,6 +20,8 @@ export default function Reader() {
   const [quizOpen, setQuizOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [chatInitialText, setChatInitialText] = useState('');
+  const [notesOpen, setNotesOpen] = useState(false);
+  const [noteGateTarget, setNoteGateTarget] = useState(null); // chapter index blocked by gate
 
   const sidebarOpen = useStore((s) => s.sidebarOpen);
   const toggleSidebar = useStore((s) => s.toggleSidebar);
@@ -95,8 +98,25 @@ export default function Reader() {
     setSavedWordList(words.map((w) => w.word));
   }
 
+  function isNoteComplete(chapterIdx) {
+    if (!book) return false;
+    const chTitle = book.chapters[chapterIdx]?.title || '';
+    // No note required for Front Matter or Back Matter
+    if (chTitle === 'Front Matter' || chTitle === 'Back Matter') return true;
+    const note = (book.notes || {})[chapterIdx] || '';
+    return note.trim().split(/\s+/).filter(Boolean).length >= 200;
+  }
+
   async function changeChapter(idx) {
     if (!book || idx < 0 || idx >= book.chapters.length) return;
+
+    // Gate: if moving forward, check if current chapter has a 200-word note
+    if (idx > currentChapter && !isNoteComplete(currentChapter)) {
+      setNoteGateTarget(idx);
+      setNotesOpen(true);
+      return;
+    }
+
     setCurrentChapter(idx);
     setScrollPercent(0);
     await db.books.update(book.id, { current_chapter: idx });
@@ -120,6 +140,30 @@ export default function Reader() {
   function handleStartChat(text) {
     setChatInitialText(text || '');
     setChatOpen(true);
+  }
+
+  async function handleNoteSaved(notes) {
+    setBook({ ...book, notes });
+    // If there's a gated chapter target and note is now complete, proceed
+    if (noteGateTarget !== null && isNoteComplete(currentChapter)) {
+      // Re-check with updated notes
+      const note = (notes || {})[currentChapter] || '';
+      const wc = note.trim().split(/\s+/).filter(Boolean).length;
+      if (wc >= 200) {
+        setNotesOpen(false);
+        setNoteGateTarget(null);
+        setCurrentChapter(noteGateTarget);
+        setScrollPercent(0);
+        await db.books.update(book.id, { current_chapter: noteGateTarget });
+      }
+    }
+  }
+
+  async function handleBookmarkSet(chapterIdx, paraIndex) {
+    const bookmarks = { ...(book.bookmarks || {}), [chapterIdx]: paraIndex };
+    if (paraIndex === null) delete bookmarks[chapterIdx];
+    await db.books.update(book.id, { bookmarks });
+    setBook({ ...book, bookmarks });
   }
 
   function handleVocabClick(vocab) {
@@ -171,6 +215,22 @@ export default function Reader() {
             <option value="Source Serif 4">Source Serif 4</option>
           </select>
           <button
+            onClick={() => setNotesOpen(true)}
+            className="text-sm px-3 py-1 border relative"
+            style={{
+              borderColor: isNoteComplete(currentChapter) ? '#4A6741' : '#D4C5B0',
+              background: isNoteComplete(currentChapter) ? '#E8F0E6' : '#FAF6F0',
+              color: '#5C3D2E',
+            }}
+          >
+            Notes
+            {isNoteComplete(currentChapter) && (
+              <span className="absolute -top-1.5 -right-1.5 text-white text-[10px] px-1 rounded-full" style={{ background: '#4A6741' }}>
+                &#10003;
+              </span>
+            )}
+          </button>
+          <button
             onClick={() => handleStartChat('')}
             className="text-sm px-3 py-1 text-white"
             style={{ background: '#5C3D2E' }}
@@ -213,12 +273,10 @@ export default function Reader() {
         <ChapterSidebar
           chapters={book.chapters}
           currentChapter={currentChapter}
-          vocabWords={vocabWords}
           onChapterSelect={changeChapter}
-          onVocabClick={handleVocabClick}
-          onOpenChat={() => handleStartChat('')}
+          onOpenNotes={() => setNotesOpen(true)}
           open={sidebarOpen}
-          bookId={book.id}
+          book={book}
         />
         {chapter ? (
           <ReadingPane
@@ -231,6 +289,8 @@ export default function Reader() {
             onWordSaved={handleWordSaved}
             onScroll={handleScroll}
             onStartChat={handleStartChat}
+            bookmark={book.bookmarks?.[currentChapter] ?? null}
+            onBookmarkSet={handleBookmarkSet}
           />
         ) : (
           <div className="flex-1 flex items-center justify-center text-sm" style={{ color: '#A89885' }}>
@@ -247,6 +307,17 @@ export default function Reader() {
       />
 
       {quizOpen && <QuizMode book={book} onClose={() => setQuizOpen(false)} />}
+
+      {notesOpen && (
+        <NotesPanel
+          bookId={book.id}
+          book={book}
+          chapterIndex={currentChapter}
+          chapterTitle={chapter?.title || ''}
+          onNoteSaved={handleNoteSaved}
+          onClose={() => { setNotesOpen(false); setNoteGateTarget(null); }}
+        />
+      )}
 
       {chatOpen && (
         <ChatPanel

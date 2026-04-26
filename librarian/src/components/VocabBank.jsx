@@ -157,9 +157,24 @@ export default function VocabBank() {
                         <div className="font-bold text-[10px] uppercase mb-1" style={{ color: '#A89885', letterSpacing: '0.1em' }}>In Context</div>
                         <p style={{ color: '#3B2F2A', lineHeight: 1.6 }}>{v.context_meaning}</p>
                       </div>
-                      <div className="flex items-center gap-4 text-xs" style={{ color: '#A89885' }}>
-                        <span>Saved {new Date(v.created_at).toLocaleDateString()}</span>
-                        <span>Chapter {v.chapter_index + 1}</span>
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-4 text-xs" style={{ color: '#A89885' }}>
+                          <span>Saved {new Date(v.created_at).toLocaleDateString()}</span>
+                          <span>Chapter {v.chapter_index + 1}</span>
+                        </div>
+                        <button
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (!window.confirm(`Delete "${v.word}" from vocabulary?`)) return;
+                            await db.vocabulary.delete(v.id);
+                            setExpandedId(null);
+                            await loadData();
+                          }}
+                          className="text-xs px-2 py-1 border"
+                          style={{ borderColor: '#C47A7A', background: '#F5E0E0', color: '#8B3A3A' }}
+                        >
+                          Delete
+                        </button>
                       </div>
                     </div>
                   )}

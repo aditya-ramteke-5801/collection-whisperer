@@ -56,6 +56,46 @@ export default function SimplifyPopup({ text, bookTitle, bookAuthor, chapterTitl
     }
   }
 
+  function renderFormatted(text) {
+    if (!text) return null;
+    const lines = text.split('\n').filter((l) => l.trim() !== '');
+    return lines.map((line, i) => {
+      // Handle dialogue: **Name:** or **Name**: or Name: at start of line
+      // Pattern covers: **Basil:** "...", **Lord Henry:**: "...", **Basil**:  "..."
+      const boldMatch = line.match(/^\*\*(.+?):?\*\*:*\s*(.*)/);
+      if (boldMatch) {
+        const name = boldMatch[1].replace(/:+$/, ''); // strip trailing colons from name
+        return (
+          <p key={i} style={{ marginBottom: '0.8em' }}>
+            <strong style={{ color: '#5C3D2E' }}>{name}:</strong> {boldMatch[2]}
+          </p>
+        );
+      }
+      // Also handle non-bold "Name:" at start (narration attributed to someone)
+      // but only for known short patterns to avoid false matches
+      return <p key={i} style={{ marginBottom: '0.8em' }}>{renderInlineBold(line)}</p>;
+    });
+  }
+
+  function renderInlineBold(text) {
+    // Replace any remaining **text** with bold spans
+    const parts = [];
+    let lastIndex = 0;
+    const regex = /\*\*(.+?)\*\*/g;
+    let match;
+    while ((match = regex.exec(text)) !== null) {
+      if (match.index > lastIndex) {
+        parts.push(text.slice(lastIndex, match.index));
+      }
+      parts.push(<strong key={match.index} style={{ color: '#5C3D2E' }}>{match[1]}</strong>);
+      lastIndex = regex.lastIndex;
+    }
+    if (lastIndex < text.length) {
+      parts.push(text.slice(lastIndex));
+    }
+    return parts.length > 0 ? parts : text;
+  }
+
   return (
     <div
       className="fixed inset-0 z-[1500] flex items-center justify-center"
@@ -111,7 +151,9 @@ export default function SimplifyPopup({ text, bookTitle, bookAuthor, chapterTitl
 
             <div className="mb-4">
               <div className="font-bold text-[10px] uppercase mb-2" style={{ color: '#A89885', letterSpacing: '0.1em' }}>In Simple English</div>
-              <p className="text-sm" style={{ color: '#3B2F2A', lineHeight: 1.7 }}>{data.simplified}</p>
+              <div className="text-sm" style={{ color: '#3B2F2A', lineHeight: 1.7 }}>
+                {renderFormatted(data.simplified)}
+              </div>
             </div>
 
             <div className="mb-4">

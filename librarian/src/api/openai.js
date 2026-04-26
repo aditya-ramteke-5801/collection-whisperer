@@ -1,5 +1,28 @@
 import { logApiUsage } from '../db';
 
+// The AI may put literal newlines inside JSON string values.
+// This fixes them before parsing.
+function safeParse(str) {
+  try {
+    return JSON.parse(str);
+  } catch {
+    const fixed = str.replace(/("(?:[^"\\]|\\.)*")/g, (match) => {
+      return match.replace(/\n/g, '\\n').replace(/\r/g, '\\r').replace(/\t/g, '\\t');
+    });
+    return JSON.parse(fixed);
+  }
+}
+
+function parseJsonResponse(content, errorMsg) {
+  try {
+    return safeParse(content);
+  } catch {
+    const match = content.match(/\{[\s\S]*\}/);
+    if (match) return safeParse(match[0]);
+    throw new Error(errorMsg || 'Failed to parse response');
+  }
+}
+
 const SYSTEM_PROMPT = `You are a vocabulary assistant for someone reading English literature.
 Given a word and the paragraph it appears in, provide:
 1. The word's pronunciation (IPA)
@@ -58,14 +81,7 @@ Chapter: ${chapterTitle}`;
   }
 
   const content = data.choices[0].message.content;
-
-  try {
-    return JSON.parse(content);
-  } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error('Failed to parse API response');
-  }
+  return parseJsonResponse(content, 'Failed to parse API response');
 }
 
 const QUIZ_PROMPT = `You are a reading comprehension quiz generator for someone reading English literature.
@@ -138,14 +154,7 @@ ${truncated}`;
   }
 
   const content = data.choices[0].message.content;
-
-  try {
-    return JSON.parse(content);
-  } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error('Failed to parse quiz response');
-  }
+  return parseJsonResponse(content, 'Failed to parse quiz response');
 }
 
 export async function simplifyText({ text, bookTitle, bookAuthor, chapterTitle, apiKey, model }) {
@@ -163,13 +172,29 @@ export async function simplifyText({ text, bookTitle, bookAuthor, chapterTitle, 
           role: 'system',
           content: `You help people understand hard-to-read passages from books. Rewrite the passage in simple, everyday English — like you're explaining it to a high school student. Keep the same meaning but use short sentences and easy words. No fancy vocabulary.
 
+CRITICAL RULE — CHARACTER ACCURACY:
+- You MUST carefully read the original passage to determine who is speaking each line.
+- Look at dialogue tags like "said Lord Henry", "he answered", "replied Basil" to identify speakers.
+- Do NOT guess or swap characters. If Lord Henry says something in the original, it MUST be Lord Henry in your version too.
+
+MANDATORY FORMATTING — YOU MUST FOLLOW THIS:
+- Any time a character speaks (dialogue in quotes), you MUST put it on its own line with the speaker's name.
+- Format: **Name:** "what they say"
+- Narration goes on its own line too.
+- Use \\n to separate lines in the JSON string.
+- NEVER combine multiple characters' dialogue into one paragraph. Each speaker gets their own line.
+- If there is NO dialogue at all, just write normal text.
+
+EXAMPLE of correct output for a passage with dialogue:
+**Lord Henry:** "This is amazing! I have to meet him."\\n\\nHallward stood up and walked around.\\n\\n**Basil:** "You don't understand, Harry. He's just part of my art."\\n\\n**Lord Henry:** "Then why won't you show the portrait?"\\n\\n**Basil:** "Because I put too much of myself into it."
+
 Then explain what's going on — who's talking, what they mean, and why it matters in the story. Keep it casual and clear.
 
 Don't use words like: assertion, embodies, juxtaposition, aesthetic, hedonistic, dichotomy, paradigm, inherently, fundamentally, nuanced.
 
 Respond in JSON only, no markdown:
 {
-  "simplified": "string (the passage rewritten in simple everyday English)",
+  "simplified": "string (passage rewritten in simple English, MUST use \\n for line breaks between dialogue)",
   "explanation": "string (2-4 simple sentences: what's happening, who's involved, why it matters)"
 }`
         },
@@ -203,13 +228,7 @@ Passage:
   }
 
   const content = data.choices[0].message.content;
-  try {
-    return JSON.parse(content);
-  } catch {
-    const match = content.match(/\{[\s\S]*\}/);
-    if (match) return JSON.parse(match[0]);
-    throw new Error('Failed to parse response');
-  }
+  return parseJsonResponse(content, 'Failed to parse response');
 }
 
 export async function generateCoverImage({ title, author, apiKey }) {

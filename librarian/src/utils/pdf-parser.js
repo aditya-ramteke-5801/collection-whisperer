@@ -16,10 +16,37 @@ const CHAPTER_PATTERNS = [
   /^\d+\.\s/,
 ];
 
+const BACK_MATTER_PATTERNS = [
+  /^appendix/i,
+  /^glossary/i,
+  /^bibliography/i,
+  /^references$/i,
+  /^notes$/i,
+  /^endnotes$/i,
+  /^footnotes$/i,
+  /^index$/i,
+  /^acknowledgements?$/i,
+  /^about\s+the\s+author/i,
+  /^colophon$/i,
+  /^afterword$/i,
+  /^also\s+by/i,
+  /^other\s+books\s+by/i,
+  /^copyright/i,
+  /^works?\s+cited/i,
+  /^further\s+reading/i,
+  /^a\s+note\s+on\s+the\s+text/i,
+];
+
 function isChapterHeading(line) {
   const trimmed = line.trim();
   if (!trimmed || trimmed.length > 80) return false;
   return CHAPTER_PATTERNS.some((p) => p.test(trimmed));
+}
+
+function isBackMatter(line) {
+  const trimmed = line.trim();
+  if (!trimmed || trimmed.length > 80) return false;
+  return BACK_MATTER_PATTERNS.some((p) => p.test(trimmed));
 }
 
 /**
@@ -36,23 +63,19 @@ async function extractPageText(page) {
   const lineMap = new Map();
   const Y_TOLERANCE = 3;
 
-  // Get page dimensions to identify header/footer zones
-  const viewport = page.getViewport({ scale: 1 });
-  const pageHeight = viewport.height;
-  const headerZone = pageHeight * 0.9;  // top 10% (Y is from bottom in PDF coords)
-  const footerZone = pageHeight * 0.1;  // bottom 10%
+  // Filter out standalone page number text items.
+  // In PDFs, page numbers are separate text items whose content is just a number.
+  // Real numbers in prose are part of larger text items (e.g. "Chapter 3" or "he had 10").
+  // So any text item that is ONLY a 1-4 digit number is almost certainly a page number.
+  const filteredItems = items.filter((item) => {
+    const trimmed = item.str.trim();
+    if (/^\d{1,4}$/.test(trimmed)) return false;
+    return true;
+  });
 
-  for (const item of items) {
+  for (const item of filteredItems) {
     const y = Math.round(item.transform[5] / Y_TOLERANCE) * Y_TOLERANCE;
     const x = item.transform[0] > 0 ? item.transform[4] : 0;
-    const rawY = item.transform[5];
-
-    // Skip standalone page numbers in header/footer zones
-    const trimmed = item.str.trim();
-    if (/^\d{1,4}$/.test(trimmed) && (rawY >= headerZone || rawY <= footerZone)) {
-      continue;
-    }
-
     if (!lineMap.has(y)) lineMap.set(y, []);
     lineMap.get(y).push({ text: item.str, x });
   }
@@ -168,7 +191,23 @@ export async function parsePdf(file, onProgress) {
     .filter(Boolean)
     // Remove standalone page numbers and very short noise lines
     .filter((p) => !(/^\d{1,4}$/.test(p)))
-    .filter((p) => !(/^(page\s+)?\d{1,4}$/i.test(p)));
+    .filter((p) => !(/^(page\s+)?\d{1,4}$/i.test(p)))
+    // Clean up page numbers embedded in text. Page numbers are 1-4 digit numbers
+    // that appear as separate PDF text items but get joined to adjacent words.
+    .map((p) => p
+      // "theirs1; and" or "theirs1 and" — number stuck to end of word
+      .replace(/([a-zA-Z])(\d{1,4})([\s;,.!?:'\u2018\u2019\u201C\u201D\u2014\u2013]|$)/g, '$1$3')
+      // "to 2 the" — standalone number between spaces
+      .replace(/ \d{1,4} /g, ' ')
+      // "2the" — number stuck to start of word
+      .replace(/(^| )(\d{1,4})([a-zA-Z])/g, '$1$3')
+      // "; 3such" — number after punctuation stuck to next word
+      .replace(/([\s;,.!?:])(\d{1,4})([a-zA-Z])/g, '$1$3')
+      // Clean up double spaces
+      .replace(/ {2,}/g, ' ')
+      .trim()
+    )
+    .filter(Boolean);
 
   if (allParagraphs.length === 0) {
     throw new Error("This PDF doesn't contain selectable text. Try a different version of the book.");
@@ -197,16 +236,48 @@ export async function parsePdf(file, onProgress) {
       });
     }
 
+    // Find where back matter starts (scan content after last chapter heading)
+    let backMatterStart = allParagraphs.length;
+    const lastChapterEnd = chapterBreaks[chapterBreaks.length - 1].index + 1;
+    for (let i = lastChapterEnd; i < allParagraphs.length; i++) {
+      if (isBackMatter(allParagraphs[i])) {
+        backMatterStart = i;
+        break;
+      }
+    }
+    // Also check between chapters for back matter headings
+    for (let i = 0; i < allParagraphs.length; i++) {
+      if (isBackMatter(allParagraphs[i]) && i < backMatterStart) {
+        backMatterStart = i;
+        break;
+      }
+    }
+
     chapterBreaks.forEach((br, idx) => {
+      // Skip chapter breaks that fall in back matter zone
+      if (br.index >= backMatterStart) return;
+
       const start = br.index;
-      const end = idx < chapterBreaks.length - 1 ? chapterBreaks[idx + 1].index : allParagraphs.length;
+      const nextBreak = idx < chapterBreaks.length - 1 ? chapterBreaks[idx + 1].index : allParagraphs.length;
+      const end = Math.min(nextBreak, backMatterStart);
       const contentParas = allParagraphs.slice(start + 1, end);
+      if (contentParas.length === 0) return;
       chapters.push({
         index: chapters.length,
         title: br.title,
         content: contentParas.join('\n\n'),
       });
     });
+
+    // Add back matter as a single chapter if it exists
+    if (backMatterStart < allParagraphs.length) {
+      const backContent = allParagraphs.slice(backMatterStart);
+      chapters.push({
+        index: chapters.length,
+        title: 'Back Matter',
+        content: backContent.join('\n\n'),
+      });
+    }
   } else {
     // No chapters detected — split by ~3000 words at paragraph boundaries
     const CHUNK_SIZE = 3000;
